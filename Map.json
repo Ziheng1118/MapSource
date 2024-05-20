@@ -1,0 +1,138 @@
+import folium
+import json
+
+# 定义颜色区间
+colors = [
+    "#00619a", # 80~100
+    "#0077C2", # 60~80
+    "#59a5f5", # 40~60
+    "#00BFFF", # 20~40
+    "#c8ffff"  # 0~20
+]
+
+# 计算保有量的最大值和最小值
+max_value = top_100_cities['保有量'].max()
+min_value = top_100_cities['保有量'].min()
+
+# 根据排名分配颜色
+def get_color(rank):
+    if rank <= 20:
+        return colors[0]
+    elif rank <= 40:
+        return colors[1]
+    elif rank <= 60:
+        return colors[2]
+    elif rank <= 80:
+        return colors[3]
+    else:
+        return colors[4]
+
+# 创建基础地图
+m = folium.Map(location=[35.8617, 104.1954], zoom_start=5)
+
+# 加载合并后的GeoJSON数据
+combined_geojson_path = 'C:/Users/ZGW1SGH/Desktop/PBI/combined_geojson.json'
+with open(combined_geojson_path, 'r', encoding='utf-8') as file:
+    combined_geojson = json.load(file)
+
+# 创建一个字典来存储地级市的颜色和附加信息
+city_info = {}
+for index, row in top_100_cities.iterrows():
+    city_info[row['地级市']] = {
+        'color': get_color(index + 1),
+        '保有量': row['保有量'],
+        '饱和数量': math.ceil(row['饱和数量']),
+        '维修站数量': row['维修站数量'],
+        '渗透率': row['维修站数量'] /math.ceil(row['饱和数量'])if row['饱和数量'] != 0 else 0
+    }
+
+# 定义样式函数来应用颜色
+def style_function(feature):
+    city_name = feature['properties']['name']
+    info = city_info.get(city_name, {})
+    return {
+        'fillColor': info.get('color', 'transparent'),
+        'color': 'black',
+        'weight': 1,
+        'fillOpacity': 0.7
+    }
+    
+# 定义地级市到经纬度的映射字典
+city_to_coords = {
+    '北京': [39.9042, 116.4074],
+    '上海': [31.2304, 121.4737],
+    '广州': [23.1291, 113.2644],
+    '郑州': [34.7466, 113.6254],
+    '成都': [30.5728, 104.0668],
+    '青岛': [36.0671, 120.3826],
+    '深圳': [22.5431, 114.0579]
+    # 添加其他地级市及其经纬度
+}
+
+# 定义鼠标悬停显示信息
+def add_tooltip_info(feature):
+    city_name = feature['properties']['name']
+    info = city_info.get(city_name, {})
+    if info:
+        feature['properties']['保有量'] = info['保有量']
+        feature['properties']['饱和数量'] = info['饱和数量']
+        feature['properties']['维修站数量'] = info['维修站数量']
+        feature['properties']['渗透率'] = f"""
+        <div style="width:100%; background-color:#e0e0e0;">
+            <div style="width:{info['渗透率'] * 100:.2f}%; background-color:green; color:white; text-align:center;">
+                {info['渗透率'] * 100:.2f}%
+            </div>
+        </div>
+        """
+    return feature
+
+combined_geojson['features'] = [add_tooltip_info(feature) for feature in combined_geojson['features']]
+
+# 添加GeoJSON覆盖层，并应用样式函数和鼠标悬停显示信息
+folium.GeoJson(
+    combined_geojson,
+    name='城市信息',
+    style_function=style_function,
+    tooltip=folium.GeoJsonTooltip(
+        fields=['name', '保有量', '饱和数量', '维修站数量', '渗透率'],
+        aliases=['城市: ', '保有量: ', '饱和数量: ', '维修站数量: ', '渗透率: '],
+        localize=True,
+        sticky=True
+    )
+).add_to(m)
+
+# 创建一个FeatureGroup用于控制绿色点的显示和隐藏
+fg_sfe = folium.FeatureGroup(name='维修站')
+
+# 添加SFE数据到FeatureGroup，用绿色点表示
+for index, row in df_sfe.iterrows():
+    if row['地级市'] in top_100_cities['地级市'].values:
+        folium.CircleMarker(
+            location=[row['Latitude'], row['Longitude']],
+            radius=4.8,  # 这里减小了40%的大小
+            color='green',
+            fill=True,
+            fill_color='green',
+            fill_opacity=0.7,
+            popup=folium.Popup(f"{row['维修站名称']}", max_width=250)
+        ).add_to(fg_sfe)
+
+# 将FeatureGroup添加到地图中
+fg_sfe.add_to(m)
+
+# 添加特殊城市的星星标识
+star_cities = ['北京', '上海', '郑州', '成都', '青岛', '深圳','广州']
+for city in star_cities:
+    coords = city_to_coords.get(city)
+    if coords:
+        folium.Marker(
+            location=coords,
+            icon=folium.Icon(icon='star', color='red'),
+            popup=folium.Popup(f"{city} (特殊标识)", max_width=250)
+        ).add_to(m)
+        
+# 添加图层控制
+folium.LayerControl().add_to(m)
+
+# 保存地图
+m.save('top_100_cities_map_with_sfe.html')
